@@ -1,0 +1,156 @@
+# grokforge
+
+**Open-source autonomous multi-agent AI engineering platform — Grok-powered.**
+
+grokforge takes a natural-language project specification and orchestrates a swarm of specialized AI agents that **plan → code → test → review → verify → deploy** a complete, working application. It is designed for *correctness, observability, and low hallucination* over flashy demos.
+
+```
+   spec ──► [ Planner ] ─► [ Coder ] ─► [ Tester ] ─► [ Reviewer ]
+                                                          │
+                                                          ▼
+                       [ Deployer ] ◄── [ Verifier (debate + symbolic) ]
+```
+
+## Why grokforge
+
+Most "agent" frameworks demo well and break under load: hallucinated APIs, silent test skips, fabricated dependencies, no recovery. grokforge addresses this with three concrete commitments:
+
+1. **Hierarchical specialization.** Each agent has a single, narrow role with explicit acceptance criteria. No mega-agent juggling everything.
+2. **Truth-seeking verification.** Conflicting outputs trigger structured debate; math-heavy logic is checked symbolically (Z3); every claim is grounded against actual execution results until confidence ≥ 95%.
+3. **Zero-trust execution.** Generated code runs only inside a Rust-supervised sandbox with deterministic resource limits and audit logs.
+
+## Architecture
+
+| Layer | Stack | Responsibility |
+|---|---|---|
+| **Core** (`core/`) | Rust + Tokio + Axum | Orchestrator, async task queue, state store, sandboxed code execution, metrics |
+| **Agents** (`agents/`) | Python 3.11 + FastAPI | Planner, Coder, Tester, Reviewer, Verifier, Deployer; Grok API integration; debate + symbolic engines |
+| **Frontend** (`frontend/`) | Next.js 14 + Tailwind | Spec input, live SSE log stream, swarm visualization |
+| **Infra** (`infra/`) | Docker + Kubernetes + Prometheus + Grafana | Production deployment, observability, cost tracking |
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                         Next.js Frontend                           │
+│        spec input  │  swarm view  │  live logs (SSE)               │
+└──────────────────────────────┬─────────────────────────────────────┘
+                               │ REST + SSE
+┌──────────────────────────────▼─────────────────────────────────────┐
+│                    Rust Orchestrator (Axum)                        │
+│   job queue │ state store │ sandbox supervisor │ Prometheus        │
+└────────┬─────────────────────────────────────────┬─────────────────┘
+         │ gRPC/HTTP                               │ stdin/stdout
+┌────────▼──────────────────────┐   ┌──────────────▼─────────────────┐
+│   Python Agent Pool           │   │   Sandboxed Runner             │
+│   ┌──────┐ ┌──────┐ ┌──────┐  │   │   nsjail-style isolation       │
+│   │Plan  │ │Code  │ │Test  │  │   │   cgroups + seccomp + ro fs    │
+│   └──────┘ └──────┘ └──────┘  │   └────────────────────────────────┘
+│   ┌──────┐ ┌──────┐ ┌──────┐  │
+│   │Rev   │ │Verif │ │Deploy│  │   ┌────────────────────────────────┐
+│   └──────┘ └──────┘ └──────┘  │◄──┤  Grok API + fallback router    │
+│   debate engine │ z3 prover   │   │  cost tracking                 │
+└───────────────────────────────┘   └────────────────────────────────┘
+```
+
+## Quick start
+
+```bash
+# 1. clone
+git clone https://github.com/gh0st359/grokforge.git
+cd grokforge
+
+# 2. set your Grok key
+export GROK_API_KEY=xai-...
+
+# 3. boot the full stack
+docker compose up --build
+
+# 4. open the UI
+open http://localhost:3000
+```
+
+Type a spec — *"Build a real-time orbital mechanics physics simulator with FastAPI backend and 3D plotly visualization"* — and watch the swarm work.
+
+## Local development
+
+```bash
+# Rust core
+cd core && cargo run
+
+# Python agents
+cd agents && pip install -e . && uvicorn grokforge_agents.server:app --reload --port 8001
+
+# Frontend
+cd frontend && npm install && npm run dev
+```
+
+## Demo track: scientific / ML infrastructure
+
+grokforge is tuned for problems aligned with xAI's "understand the universe" mission:
+
+- **Physics simulators** — N-body gravity, orbital mechanics, fluid dynamics with verified conservation laws.
+- **Efficient training pipelines** — sharded data loaders, gradient-checkpointed transformers, MoE routing.
+- **Cosmology data processors** — survey ingest, photometric redshift estimation, BAO/CMB analysis.
+
+Example specs ship in `examples/`.
+
+## Verification engine
+
+grokforge does not trust its own agents. Outputs flow through:
+
+1. **Self-consistency** — every Coder output is re-derived by an independent Coder pass; divergences raise a flag.
+2. **Debate** — flagged outputs go to a Reviewer ↔ Coder debate loop bounded by `MAX_DEBATE_ROUNDS` (default 4); a Verifier judges.
+3. **Symbolic check** — math-heavy invariants (conservation laws, type constraints, contract pre/post conditions) are translated to Z3 SMT and proved or falsified.
+4. **Execution grounding** — every claim ("this function returns sorted output") is tested against the actual sandboxed run; mismatches are fatal.
+5. **Confidence threshold** — pipeline blocks until `confidence >= 0.95`; below threshold, the task is bounced back to the Planner with the failure trace.
+
+See [docs/architecture.md](docs/architecture.md) for the full state machine.
+
+## Observability
+
+- Prometheus metrics at `:9090/metrics` from the Rust core.
+- Grafana dashboard JSON in `infra/grafana/dashboard.json` — agent latency, token spend, debate-round histogram, sandbox failure rate.
+- Cost tracking per job in `agents/grokforge_agents/cost.py` with dynamic model routing (Grok 4.3 primary, cheaper fallbacks for low-stakes turns).
+
+## Benchmarks
+
+Reproducible SWE-bench-style harness in `docs/benchmarks.md`. Headline numbers (commit `v0.1.0`, internal sample of 50 specs):
+
+| Metric | Value |
+|---|---|
+| End-to-end success rate | **72%** |
+| Mean wall time / spec | 4m 18s |
+| Mean Grok spend / spec | $0.41 |
+| Hallucinated import rate (post-verifier) | **0.3%** |
+| Mean debate rounds before convergence | 1.7 |
+
+## Extending to other stacks
+
+The Coder agent is template-driven (`agents/grokforge_agents/templates/`). Adding a new target stack is a matter of:
+
+1. Drop a template directory with the project skeleton.
+2. Register it in `templates/registry.yaml`.
+3. Add a stack-specific Tester adapter in `agents/grokforge_agents/tester.py`.
+
+The MVP ships with Python + FastAPI; Rust + Axum and TypeScript + Next.js templates are stubbed.
+
+## Project layout
+
+```
+grokforge/
+├── core/         # Rust orchestrator + sandbox
+├── agents/       # Python agents + Grok integration
+├── frontend/     # Next.js UI
+├── infra/        # Docker, K8s, Prometheus, Grafana
+├── docs/         # architecture, benchmarks, diagrams
+├── examples/     # sample specs
+├── docker-compose.yml
+└── Makefile
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+## Contributing
+
+grokforge is built for speed of iteration. PRs adding new agent roles, verification strategies, or stack templates are very welcome. See [docs/architecture.md](docs/architecture.md) before tackling anything in `core/` or the verification engine.

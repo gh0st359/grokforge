@@ -1,0 +1,48 @@
+Job lifecycle (ASCII)
+=====================
+
+  user spec
+      │
+      ▼
+  ┌────────┐
+  │ POST   │  /jobs
+  │ /jobs  │  ─────► queue
+  └────────┘
+      │
+      ▼
+  ┌─────────┐
+  │ Planner │  spec → milestones, acceptance, stack
+  └────┬────┘
+       │
+       ▼
+  ┌─────────┐
+  │  Coder  │  template + LLM patch → files[]
+  └────┬────┘
+       │
+       ▼
+  ┌─────────┐
+  │ Tester  │  pytest in sandbox → result
+  └────┬────┘
+       │
+       ▼
+  ┌──────────┐
+  │ Reviewer │  static + LLM scan → issues, approved
+  └────┬─────┘
+       │
+       ▼
+  ┌──────────┐    ┌──────────┐    ┌──────────┐
+  │ Verifier │ ── │  debate  │ ── │ symbolic │
+  └────┬─────┘    └──────────┘    └──────────┘
+       │
+       │  confidence ≥ 0.95?
+       │
+       ├─ no  ──► retry verify (up to MAX_DEBATE_ROUNDS)
+       │
+       └─ yes ──┐
+                ▼
+         ┌──────────┐
+         │ Deployer │  Dockerfile + K8s + CI
+         └────┬─────┘
+              │
+              ▼
+          succeeded

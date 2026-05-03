@@ -1,0 +1,19 @@
+# Registry of project templates the Coder agent can render.
+# Add a new entry to support a new target stack; the directory must contain a
+# self-consistent runnable scaffold + tests.
+templates:
+  python_fastapi:
+    stack: python+fastapi
+    entrypoint: "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    test_command: "pytest -q"
+    description: "FastAPI service with pytest. Default for v0.1."
+  rust_axum:
+    stack: rust+axum
+    entrypoint: "./target/release/app"
+    test_command: "cargo test --release"
+    description: "Stubbed — falls back to python_fastapi until template ships."
+  typescript_next:
+    stack: typescript+next
+    entrypoint: "npm start"
+    test_command: "npm test"
+    description: "Stubbed — falls back to python_fastapi until template ships."

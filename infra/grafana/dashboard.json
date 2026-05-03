@@ -1,0 +1,55 @@
+{
+  "title": "grokforge",
+  "uid": "grokforge",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Jobs submitted",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "grokforge_jobs_submitted_total" }]
+    },
+    {
+      "type": "stat",
+      "title": "Jobs succeeded",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "grokforge_jobs_succeeded_total" }]
+    },
+    {
+      "type": "stat",
+      "title": "Jobs failed",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "grokforge_jobs_failed_total" }]
+    },
+    {
+      "type": "stat",
+      "title": "Total LLM spend ($)",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "grokforge_token_cost_usd_total" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Stage latency p95 (s)",
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 8 },
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum by (stage, le) (rate(grokforge_stage_latency_seconds_bucket[5m])))",
+        "legendFormat": "{{stage}}"
+      }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Submission rate",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [{ "expr": "rate(grokforge_jobs_submitted_total[5m])" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Failure rate",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [{ "expr": "rate(grokforge_jobs_failed_total[5m])" }]
+    }
+  ]
+}

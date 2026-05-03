@@ -1,0 +1,45 @@
+# Rust
+core/target/
+**/*.rs.bk
+Cargo.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+
+# Node
+node_modules/
+.next/
+.turbo/
+out/
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Logs / runtime
+*.log
+logs/
+runs/
+artifacts/
+.grokforge_state/
+
+# Docker
+*.tar

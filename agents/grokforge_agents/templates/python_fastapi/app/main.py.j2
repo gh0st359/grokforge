@@ -1,0 +1,30 @@
+"""{{ summary }}"""
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI(title="grokforge-output", version="0.1.0")
+
+
+class ComputeRequest(BaseModel):
+    x: float
+    y: float
+
+
+class ComputeResponse(BaseModel):
+    sum: float
+    product: float
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok"}
+
+
+@app.post("/compute", response_model=ComputeResponse)
+def compute(req: ComputeRequest) -> ComputeResponse:
+    return ComputeResponse(sum=req.x + req.y, product=req.x * req.y)
+
+
+@app.get("/milestones")
+def milestones() -> list[dict]:
+    return {{ milestones | tojson }}
