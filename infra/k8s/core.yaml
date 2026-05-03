@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core
+  namespace: grokforge
+  labels: { app: core }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: core } }
+  template:
+    metadata:
+      labels: { app: core }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      containers:
+        - name: core
+          image: grokforge/core:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: metrics, containerPort: 9090 }
+          env:
+            - { name: RUST_LOG, value: info }
+            - { name: AGENTS_URL, value: http://agents:8001 }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits:   { cpu: "1",    memory: "1Gi" }
+          volumeMounts:
+            - { name: state, mountPath: /var/lib/grokforge }
+      volumes:
+        - name: state
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: core
+  namespace: grokforge
+spec:
+  selector: { app: core }
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }
+    - { name: metrics, port: 9090, targetPort: 9090 }

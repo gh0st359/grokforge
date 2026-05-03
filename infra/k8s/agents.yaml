@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grok-credentials
+  namespace: grokforge
+type: Opaque
+stringData:
+  api-key: "REPLACE_ME"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agents
+  namespace: grokforge
+  labels: { app: agents }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: agents } }
+  template:
+    metadata:
+      labels: { app: agents }
+    spec:
+      containers:
+        - name: agents
+          image: grokforge/agents:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8001 }
+          env:
+            - name: GROK_API_KEY
+              valueFrom: { secretKeyRef: { name: grok-credentials, key: api-key } }
+            - { name: GROK_PRIMARY_MODEL, value: grok-4-3 }
+            - { name: GROK_FALLBACK_MODEL, value: grok-4-mini }
+            - { name: MAX_DEBATE_ROUNDS, value: "4" }
+            - { name: CONFIDENCE_THRESHOLD, value: "0.95" }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits:   { cpu: "1",    memory: "1Gi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agents
+  namespace: grokforge
+spec:
+  selector: { app: agents }
+  ports:
+    - { name: http, port: 8001, targetPort: 8001 }
