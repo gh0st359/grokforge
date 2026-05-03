@@ -10,9 +10,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml /app/pyproject.toml
+# pyproject.toml references README.md, so it must be present at install time.
+COPY pyproject.toml README.md /app/
 COPY grokforge_agents /app/grokforge_agents
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir .
 
 EXPOSE 8001
 CMD ["uvicorn", "grokforge_agents.server:app", "--host", "0.0.0.0", "--port", "8001"]

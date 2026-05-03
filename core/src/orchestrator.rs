@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::config::Config;
 use crate::queue::{self, JobQueue, JobQueueRx};
+use crate::sandbox::{Sandbox, SandboxLimits, SandboxResult};
 use crate::state::{AgentEvent, JobStatus, StateStore};
 
 const MAX_DEBATE_ROUNDS: u32 = 4;
@@ -61,6 +62,31 @@ impl Orchestrator {
                 .build()
                 .expect("reqwest client"),
         }
+    }
+
+    /// Construct a Sandbox configured from this orchestrator's Config.
+    /// Used by `/sandbox/exec` and (in future) by Coder/Tester for isolated runs.
+    pub fn make_sandbox(&self) -> std::io::Result<Sandbox> {
+        Sandbox::new(SandboxLimits {
+            cpu_seconds: self.cfg.sandbox_cpu_seconds,
+            memory_mb: self.cfg.sandbox_memory_mb,
+            wall_seconds: self.cfg.sandbox_wall_seconds,
+        })
+    }
+
+    /// Run a single command in a fresh sandbox. Files in `files` are written
+    /// before execution. Returns the structured sandbox result.
+    pub async fn sandbox_exec(
+        &self,
+        program: &str,
+        args: &[&str],
+        files: &[(String, String)],
+    ) -> Result<SandboxResult> {
+        let sb = self.make_sandbox()?;
+        for (rel, contents) in files {
+            sb.write_file(rel, contents.as_bytes()).await?;
+        }
+        sb.run(program, args).await
     }
 
     pub async fn submit(&self, spec: String) -> Result<Uuid> {

@@ -112,14 +112,21 @@ class CoderAgent(Agent):
             "milestones": plan.get("milestones", []),
         }
         for path in root.rglob("*"):
-            if path.is_file():
-                rel = path.relative_to(root).as_posix()
-                if rel.endswith(".j2"):
-                    rel = rel[:-3]
-                    template = self.env.get_template(f"{stack_dir}/{path.relative_to(root).as_posix()}")
-                    out[rel] = template.render(**ctx)
-                else:
-                    out[rel] = path.read_text()
+            if not path.is_file():
+                continue
+            # Skip Python build/cache artifacts that may sit beside template files.
+            if any(part in {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
+                   for part in path.parts):
+                continue
+            if path.suffix in {".pyc", ".pyo"}:
+                continue
+            rel = path.relative_to(root).as_posix()
+            if rel.endswith(".j2"):
+                rel = rel[:-3]
+                template = self.env.get_template(f"{stack_dir}/{path.relative_to(root).as_posix()}")
+                out[rel] = template.render(**ctx)
+            else:
+                out[rel] = path.read_text()
         return out
 
 

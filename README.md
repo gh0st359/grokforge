@@ -51,35 +51,92 @@ Most "agent" frameworks demo well and break under load: hallucinated APIs, silen
 └───────────────────────────────┘   └────────────────────────────────┘
 ```
 
-## Quick start
+## Quick start (Docker)
+
+You need Docker Desktop or Docker Engine + the `compose` plugin. Verify with:
+
+```bash
+docker --version
+docker compose version
+```
+
+Then:
 
 ```bash
 # 1. clone
 git clone https://github.com/gh0st359/grokforge.git
 cd grokforge
 
-# 2. set your Grok key
-export GROK_API_KEY=xai-...
+# 2. (optional) set your xAI key — otherwise the stack runs in mock mode
+cp .env.example .env
+# edit .env and set GROK_API_KEY=xai-...   ← only if you want live Grok calls
 
-# 3. boot the full stack
-docker compose up --build
+# 3. validate the compose file before building
+docker compose config >/dev/null && echo "compose ok"
 
-# 4. open the UI
-open http://localhost:3000
+# 4. build all images (first run is slow — Rust core compiles from source)
+docker compose build
+
+# 5. start the stack
+docker compose up -d
+
+# 6. tail logs while the swarm works
+docker compose logs -f core agents
 ```
 
-Type a spec — *"Build a real-time orbital mechanics physics simulator with FastAPI backend and 3D plotly visualization"* — and watch the swarm work.
+Open the UI:
 
-## Local development
+| URL | What |
+|---|---|
+| http://localhost:3000 | grokforge frontend |
+| http://localhost:8080/health | core REST API |
+| http://localhost:9091 | Prometheus |
+| http://localhost:3001 | Grafana (anonymous, dashboard provisioned) |
+
+Type a spec — *"Build a real-time orbital mechanics physics simulator with FastAPI backend"* — and watch the swarm work.
+
+To shut down: `docker compose down` (add `-v` to also drop the state volume).
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `Cannot connect to the Docker daemon` | Docker isn't running. Start Docker Desktop, or `sudo systemctl start docker` on Linux. |
+| `permission denied while trying to connect ... docker.sock` | Add yourself to the `docker` group: `sudo usermod -aG docker $USER` then re-login. |
+| Compose build hangs on "Compiling grokforge-core" | First-time Rust build from source — expect 3–6 min. Subsequent builds are cached. |
+| `frontend` container exits with `Cannot find module './server.js'` | Rebuild without cache: `docker compose build --no-cache frontend`. |
+| Port already in use | Another service is on 3000/8080/9091/3001. Stop it or change the host-side port in `docker-compose.yml`. |
+| `agents` returns 500 on every request | If `GROK_API_KEY` is set but invalid, calls fail. Either fix the key or unset it to use mock mode. |
+| Logs show `agent planner returned non-2xx` | Almost always a malformed `GROK_API_KEY`. Re-check `.env` and `docker compose up -d --force-recreate agents`. |
+
+### Sanity check (no Docker)
 
 ```bash
 # Rust core
-cd core && cargo run
+cd core && cargo test
 
-# Python agents
-cd agents && pip install -e . && uvicorn grokforge_agents.server:app --reload --port 8001
+# Python agents (uses mock mode — no API key needed)
+cd ../agents && pip install -e ".[dev]" && pytest -q
 
 # Frontend
+cd ../frontend && npm install && npm run build
+```
+
+If those three pass, your environment is good and any remaining issue is Docker-specific.
+
+## Local development (no Docker)
+
+Three terminals:
+
+```bash
+# Terminal 1 — Rust core (Axum + SSE on :8080, metrics on :9090)
+cd core && cargo run
+
+# Terminal 2 — Python agents (FastAPI on :8001)
+cd agents && pip install -e ".[dev]"
+uvicorn grokforge_agents.server:app --reload --port 8001
+
+# Terminal 3 — Next.js frontend (:3000)
 cd frontend && npm install && npm run dev
 ```
 

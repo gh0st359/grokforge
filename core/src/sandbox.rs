@@ -42,12 +42,15 @@ pub struct SandboxResult {
 pub struct Sandbox {
     pub workdir: PathBuf,
     pub limits: SandboxLimits,
+    /// Held so the tempdir is cleaned up when the Sandbox is dropped.
+    _tempdir: tempfile::TempDir,
 }
 
 impl Sandbox {
     pub fn new(limits: SandboxLimits) -> std::io::Result<Self> {
         let dir = tempfile::Builder::new().prefix("grokforge-").tempdir()?;
-        Ok(Self { workdir: dir.into_path(), limits })
+        let workdir = dir.path().to_path_buf();
+        Ok(Self { workdir, limits, _tempdir: dir })
     }
 
     pub async fn write_file(&self, rel: impl AsRef<Path>, contents: &[u8]) -> std::io::Result<()> {
@@ -72,17 +75,20 @@ impl Sandbox {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        // tokio::process::Command has its own pre_exec — no extra trait import needed.
         #[cfg(target_os = "linux")]
         {
-            use std::os::unix::process::CommandExt;
             let cpu = self.limits.cpu_seconds;
             let mem_bytes = self.limits.memory_mb.saturating_mul(1024 * 1024);
             unsafe {
                 cmd.pre_exec(move || {
-                    apply_rlimit(nix_rlimit::CPU, cpu);
-                    apply_rlimit(nix_rlimit::AS, mem_bytes);
-                    apply_rlimit(nix_rlimit::FSIZE, 64 * 1024 * 1024);
-                    nix_rlimit::setpgid_self();
+                    apply_rlimit(nix::sys::resource::Resource::RLIMIT_CPU, cpu);
+                    apply_rlimit(nix::sys::resource::Resource::RLIMIT_AS, mem_bytes);
+                    apply_rlimit(nix::sys::resource::Resource::RLIMIT_FSIZE, 64 * 1024 * 1024);
+                    let _ = nix::unistd::setpgid(
+                        nix::unistd::Pid::from_raw(0),
+                        nix::unistd::Pid::from_raw(0),
+                    );
                     Ok(())
                 });
             }
@@ -125,17 +131,6 @@ async fn read_to_string_opt<R: tokio::io::AsyncRead + Unpin>(r: Option<R>) -> St
 }
 
 #[cfg(target_os = "linux")]
-mod nix_rlimit {
-    use nix::sys::resource::{setrlimit, Resource};
-    pub const CPU: Resource = Resource::RLIMIT_CPU;
-    pub const AS: Resource = Resource::RLIMIT_AS;
-    pub const FSIZE: Resource = Resource::RLIMIT_FSIZE;
-    pub fn setpgid_self() {
-        let _ = nix::unistd::setpgid(nix::unistd::Pid::from_raw(0), nix::unistd::Pid::from_raw(0));
-    }
-}
-
-#[cfg(target_os = "linux")]
 fn apply_rlimit(resource: nix::sys::resource::Resource, value: u64) {
     let _ = nix::sys::resource::setrlimit(resource, value, value);
 }
@@ -149,15 +144,22 @@ mod tests {
         let sb = Sandbox::new(SandboxLimits::default()).unwrap();
         let r = sb.run("echo", &["hello"]).await.unwrap();
         assert!(r.stdout.contains("hello"));
-        assert_eq!(r.timed_out, false);
+        assert!(!r.timed_out);
     }
 
     #[tokio::test]
     async fn timeout_is_enforced() {
-        let mut limits = SandboxLimits::default();
-        limits.wall_seconds = 1;
+        let limits = SandboxLimits { wall_seconds: 1, ..Default::default() };
         let sb = Sandbox::new(limits).unwrap();
         let r = sb.run("sleep", &["5"]).await.unwrap();
         assert!(r.timed_out);
+    }
+
+    #[tokio::test]
+    async fn write_file_persists() {
+        let sb = Sandbox::new(SandboxLimits::default()).unwrap();
+        sb.write_file("hello.txt", b"world").await.unwrap();
+        let r = sb.run("cat", &["hello.txt"]).await.unwrap();
+        assert_eq!(r.stdout, "world");
     }
 }

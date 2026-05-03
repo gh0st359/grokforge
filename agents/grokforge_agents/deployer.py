@@ -9,7 +9,6 @@ and the commands needed to ship them.
 from __future__ import annotations
 
 import textwrap
-from pathlib import Path
 from typing import Any
 
 from .base import Agent, AgentRequest

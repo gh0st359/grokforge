@@ -1,7 +1,8 @@
-.PHONY: help dev build test lint clean docker up down logs
+.PHONY: help dev build test lint clean docker up down logs doctor
 
 help:
 	@echo "grokforge — make targets"
+	@echo "  make doctor    diagnose your environment (Docker, Rust, Python, Node)"
 	@echo "  make dev       run core + agents + frontend in dev mode"
 	@echo "  make build     build all components"
 	@echo "  make test      run all test suites"
@@ -11,6 +12,17 @@ help:
 	@echo "  make down      docker compose down -v"
 	@echo "  make logs      tail docker compose logs"
 	@echo "  make clean     remove build artifacts"
+
+doctor:
+	@echo "== grokforge environment check =="
+	@printf "docker:        " ; docker --version 2>/dev/null || echo "MISSING (install Docker Desktop or Engine)"
+	@printf "docker compose: " ; docker compose version 2>/dev/null || echo "MISSING (install the compose plugin)"
+	@printf "docker daemon: " ; docker info >/dev/null 2>&1 && echo "running" || echo "NOT RUNNING (start Docker Desktop / systemctl start docker)"
+	@printf "cargo:         " ; cargo --version 2>/dev/null || echo "MISSING (https://rustup.rs)"
+	@printf "python:        " ; python3 --version 2>/dev/null || echo "MISSING (need 3.11+)"
+	@printf "node:          " ; node --version 2>/dev/null || echo "MISSING (need 20+)"
+	@printf "compose file:  " ; docker compose config >/dev/null 2>&1 && echo "valid" || echo "INVALID (run: docker compose config)"
+	@printf ".env present:  " ; test -f .env && echo "yes" || echo "no (optional — copy .env.example to .env if you have a Grok key)"
 
 dev:
 	@echo "[grokforge] launching dev stack (3 panes recommended)"

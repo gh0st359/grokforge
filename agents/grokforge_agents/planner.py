@@ -11,7 +11,6 @@ import json
 from typing import Any
 
 from .base import Agent, AgentRequest
-from .grok_client import GrokClient
 from .router import ModelRouter
 
 SYSTEM_PROMPT = """You are the Planner agent in grokforge.

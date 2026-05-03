@@ -31,6 +31,15 @@ pub struct SubmitResponse {
     pub id: Uuid,
 }
 
+#[derive(Deserialize)]
+pub struct SandboxExecRequest {
+    pub program: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub files: Vec<(String, String)>,
+}
+
 pub async fn serve(orch: Arc<Orchestrator>, addr: SocketAddr) -> anyhow::Result<()> {
     let cors = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any);
     let app = Router::new()
@@ -38,6 +47,8 @@ pub async fn serve(orch: Arc<Orchestrator>, addr: SocketAddr) -> anyhow::Result<
         .route("/jobs", post(submit_job).get(list_jobs))
         .route("/jobs/:id", get(get_job))
         .route("/jobs/:id/events", get(job_events))
+        .route("/sandbox/info", get(sandbox_info))
+        .route("/sandbox/exec", post(sandbox_exec))
         .with_state(orch)
         .layer(cors);
 
@@ -64,6 +75,34 @@ async fn get_job(
     Path(id): Path<Uuid>,
 ) -> Result<Json<Job>, StatusCode> {
     orch.store.get(id).map(Json).ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn sandbox_info(State(orch): State<Arc<Orchestrator>>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "limits": {
+            "cpu_seconds": orch.cfg.sandbox_cpu_seconds,
+            "memory_mb": orch.cfg.sandbox_memory_mb,
+            "wall_seconds": orch.cfg.sandbox_wall_seconds,
+        },
+        "platform": std::env::consts::OS,
+    }))
+}
+
+async fn sandbox_exec(
+    State(orch): State<Arc<Orchestrator>>,
+    Json(req): Json<SandboxExecRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let arg_refs: Vec<&str> = req.args.iter().map(String::as_str).collect();
+    let result = orch
+        .sandbox_exec(&req.program, &arg_refs, &req.files)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "exit_code": result.exit_code,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "timed_out": result.timed_out,
+    })))
 }
 
 async fn job_events(
