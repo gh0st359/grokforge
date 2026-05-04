@@ -1,16 +1,19 @@
 # grokforge core — Rust orchestrator
-FROM rust:1.82-slim AS builder
+# `rust:latest` keeps the toolchain current so transitive deps that bump
+# their MSRV (e.g. tempfile, axum, reqwest) always compile cleanly.
+FROM rust:latest AS builder
 WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config libssl-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY Cargo.toml ./
 COPY src ./src
-# We don't ship a Cargo.lock by design (libraries should pin transitive deps).
-# Build without --locked so the resolver is free to pick MSRV-compatible versions.
-RUN cargo build --release
+# We don't ship a Cargo.lock by design. `--locked` will fail when the lockfile
+# is absent; the `||` fallback then lets the resolver pick fresh versions.
+RUN cargo build --release --locked || cargo build --release
 
 FROM debian:bookworm-slim
+# `curl` is needed for the HEALTHCHECK below.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libssl3 curl \
     && rm -rf /var/lib/apt/lists/*
