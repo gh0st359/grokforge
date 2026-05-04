@@ -1,9 +1,8 @@
 """Deployer agent.
 
-Packages the verified code into a Docker image + Kubernetes manifests.
-Does not actually push to a registry or apply to a cluster — that is
-intentionally left to the operator. Output is a directory of artifacts
-and the commands needed to ship them.
+Packages the verified code into a Docker image + Kubernetes manifests +
+GitHub Actions workflow. Emits a `file_written` event per artifact so
+the user sees the deploy bundle assemble in real time.
 """
 
 from __future__ import annotations
@@ -72,44 +71,43 @@ class DeployerAgent(Agent):
         app_name = "grokforge-output"
         image_tag = f"{app_name}:latest"
 
-        # Ensure Dockerfile present.
-        if not any(f["path"] == "Dockerfile" for f in files):
-            files.append({"path": "Dockerfile", "content": DOCKERFILE})
-            self.log("added Dockerfile")
+        self.think(
+            f"Packaging {len(files)} source file(s) for deployment. "
+            "I'll add a Dockerfile, K8s manifests, GitHub Actions CI, and a DEPLOY.md "
+            "if any are missing — never overwrite the Coder's choice if one already exists.",
+            scope="strategy",
+        )
 
-        # Ensure requirements.txt present.
-        if not any(f["path"] == "requirements.txt" for f in files):
-            files.append({"path": "requirements.txt", "content": "fastapi\nuvicorn[standard]\n"})
-            self.log("added requirements.txt")
+        self._add_if_missing(files, "Dockerfile", DOCKERFILE, "dockerfile")
+        self._add_if_missing(files, "requirements.txt",
+                             "fastapi==0.110.0\nuvicorn[standard]==0.27.1\npydantic==2.6.1\n", "text")
 
-        # K8s manifest
         k8s = K8S_DEPLOYMENT.format(name=app_name, image=image_tag)
         files.append({"path": "k8s/deployment.yaml", "content": k8s})
+        self.file_written("k8s/deployment.yaml", k8s, language="yaml")
 
-        # GitHub Actions for CI/CD
-        files.append({"path": ".github/workflows/ci.yaml", "content": _ci_workflow(app_name)})
+        ci = _ci_workflow(app_name)
+        files.append({"path": ".github/workflows/ci.yaml", "content": ci})
+        self.file_written(".github/workflows/ci.yaml", ci, language="yaml")
 
-        # README
-        files.append({"path": "DEPLOY.md", "content": textwrap.dedent(f"""\
+        deploy_md = textwrap.dedent(f"""\
             # Deploy
 
-            Build:
-            ```
+            ```bash
             docker build -t {image_tag} .
-            ```
-
-            Run locally:
-            ```
             docker run --rm -p 8000:8000 {image_tag}
-            ```
-
-            Kubernetes:
-            ```
             kubectl apply -f k8s/deployment.yaml
             ```
-            """)})
+            """)
+        files.append({"path": "DEPLOY.md", "content": deploy_md})
+        self.file_written("DEPLOY.md", deploy_md, language="markdown")
 
-        self.log(f"packaged {len(files)} files for deployment")
+        self.decide(
+            f"image tag = {image_tag}",
+            "v0.1 ships untagged 'latest' for local dev; production should be content-addressed.",
+        )
+
+        self.metric("deploy_files", len(files), "")
         return {
             "files": files,
             "image": image_tag,
@@ -126,6 +124,14 @@ class DeployerAgent(Agent):
         has_docker = any(f["path"] == "Dockerfile" for f in files)
         has_k8s = any("k8s/" in f["path"] for f in files)
         return 0.5 + 0.25 * has_docker + 0.25 * has_k8s
+
+    def _add_if_missing(self, files: list[dict[str, str]], path: str, content: str,
+                        language: str) -> None:
+        if any(f["path"] == path for f in files):
+            self.log(f"{path} already present from upstream agent — keeping it")
+            return
+        files.append({"path": path, "content": content})
+        self.file_written(path, content, language=language)
 
 
 def _ci_workflow(app_name: str) -> str:

@@ -3,13 +3,13 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "grokforge",
-  description: "Autonomous multi-agent AI engineering platform",
+  description: "Autonomous multi-agent AI engineering platform · grok-powered",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="en" className="dark">
+      <body className="min-h-screen antialiased">{children}</body>
     </html>
   );
 }

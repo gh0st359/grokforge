@@ -2,12 +2,75 @@
 @tailwind components;
 @tailwind utilities;
 
-html,
-body {
-  background: theme(colors.forge.bg);
-  color: #e6edf3;
-  min-height: 100vh;
-  font-family: ui-sans-serif, system-ui, sans-serif;
+@layer base {
+  :root {
+    --background: 222 26% 6%;
+    --foreground: 210 20% 92%;
+
+    --card: 222 22% 9%;
+    --card-foreground: 210 20% 92%;
+
+    --primary: 159 81% 58%;
+    --primary-foreground: 222 26% 6%;
+
+    --secondary: 222 18% 14%;
+    --secondary-foreground: 210 20% 92%;
+
+    --muted: 222 18% 14%;
+    --muted-foreground: 215 14% 60%;
+
+    --accent: 159 81% 58%;
+    --accent-foreground: 222 26% 6%;
+
+    --destructive: 350 89% 65%;
+    --destructive-foreground: 222 26% 6%;
+
+    --border: 222 16% 18%;
+    --input: 222 16% 18%;
+    --ring: 159 81% 58%;
+
+    --radius: 0.6rem;
+  }
+
+  * { @apply border-border; }
+
+  html, body {
+    @apply bg-background text-foreground;
+    min-height: 100vh;
+    font-feature-settings: "ss01", "cv11";
+  }
+
+  ::selection { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
+
+  /* gradient backdrop */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(circle at 15% 10%, hsla(159, 81%, 30%, 0.18), transparent 40%),
+      radial-gradient(circle at 85% 90%, hsla(199, 80%, 30%, 0.15), transparent 40%),
+      radial-gradient(circle at 50% 50%, hsla(290, 60%, 30%, 0.10), transparent 60%);
+    pointer-events: none;
+  }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: hsl(var(--muted)); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--border)); }
 }
 
-::selection { background: theme(colors.forge.accent); color: #000; }
+@layer utilities {
+  .glass {
+    background: hsla(222, 22%, 9%, 0.7);
+    backdrop-filter: blur(12px) saturate(140%);
+    border: 1px solid hsl(var(--border));
+  }
+  .gradient-border {
+    background:
+      linear-gradient(hsl(var(--card)), hsl(var(--card))) padding-box,
+      linear-gradient(135deg, hsl(var(--primary)), hsla(199, 81%, 58%, 0.3)) border-box;
+    border: 1px solid transparent;
+  }
+}

@@ -29,6 +29,14 @@ pub struct AgentRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ForwardedEvent {
+    pub kind: String,
+    pub agent: String,
+    pub ts: String,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AgentResponse {
     pub stage: String,
     pub output: serde_json::Value,
@@ -38,6 +46,8 @@ pub struct AgentResponse {
     pub cost_usd: f64,
     #[serde(default)]
     pub logs: Vec<String>,
+    #[serde(default)]
+    pub events: Vec<ForwardedEvent>,
 }
 
 pub struct Orchestrator {
@@ -212,14 +222,26 @@ impl Orchestrator {
         }
         let parsed: AgentResponse = resp.json().await?;
 
-        // Fan logs into the SSE stream and update cost.
-        for line in &parsed.logs {
+        // Fan typed events into the SSE stream first (rich UI rendering).
+        for ev in &parsed.events {
             self.store.emit(AgentEvent {
                 job_id: id, ts: Utc::now(),
-                agent: stage.into(),
-                kind: "log".into(),
-                payload: json!({"line": line}),
+                agent: ev.agent.clone(),
+                kind: ev.kind.clone(),
+                payload: ev.payload.clone(),
             }).await;
+        }
+        // Plain logs are emitted only if there were no typed events from
+        // the agent (older or simpler agents without rich emitters).
+        if parsed.events.is_empty() {
+            for line in &parsed.logs {
+                self.store.emit(AgentEvent {
+                    job_id: id, ts: Utc::now(),
+                    agent: stage.into(),
+                    kind: "log".into(),
+                    payload: json!({"line": line}),
+                }).await;
+            }
         }
         if parsed.cost_usd > 0.0 {
             self.store.update(id, |j| j.cost_usd += parsed.cost_usd);
