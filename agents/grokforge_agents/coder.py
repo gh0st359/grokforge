@@ -1,9 +1,14 @@
 """Coder agent.
 
-Renders a runnable project skeleton from a Jinja2 template selected by the
-plan's `stack` field, then optionally asks Grok to fill in the
-domain-specific endpoint(s) from the spec. Returns a list of
-{path, content} pairs which the Tester will materialize on disk.
+Renders a runnable project skeleton from a Jinja2 template, optionally
+asks Grok to layer the spec-specific implementation on top, and emits a
+typed event per file written so the UI can build a live file tree and
+syntax-highlight the contents in a code pane.
+
+In offline / mock mode, the Coder generates spec-tailored code using
+heuristic keyword matching against the plan — orbital mechanics produces
+a real velocity-Verlet integrator, photo-z produces a histogramming
+endpoint, etc. The user always sees actual working code, never lorem ipsum.
 """
 
 from __future__ import annotations
@@ -16,18 +21,18 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .base import Agent, AgentRequest
 from .router import ModelRouter
+from .codegen import generate_spec_specific_code
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 SYSTEM_PROMPT = """You are the Coder agent in grokforge.
 Given a project plan, emit production-grade source files as strict JSON:
-{"files": [{"path": "app/main.py", "content": "..."}], "entrypoint": "uvicorn app.main:app"}
+{"files": [{"path": "app/main.py", "content": "..."}], "entrypoint": "..."}
 
 Rules:
 - All file contents must be self-consistent and runnable as-is.
 - Imports must reference real, currently-pinned packages.
 - No placeholders ("TODO", "...", "your code here"). Fill everything.
-- Include a `requirements.txt` and a `Dockerfile`.
 - Keep it small: <= 8 files, <= 600 lines total.
 Return only JSON.
 """
@@ -48,37 +53,72 @@ class CoderAgent(Agent):
     async def run(self, req: AgentRequest) -> dict[str, Any]:
         plan = req.input or {}
         stack = plan.get("stack", "python+fastapi")
-        self.log(f"coding stack={stack}")
+        spec = (plan.get("spec") or plan.get("summary") or "").strip()
 
-        # Always start from the deterministic template so we have a known-good baseline.
-        files = self._render_template(stack, plan)
-
-        # Then ask the LLM to layer on the spec-specific logic.
-        prompt = (
-            "PLAN:\n" + json.dumps(plan, indent=2)
-            + "\n\nBaseline files already exist (FastAPI scaffold). "
-            + "Replace ONLY the contents of `app/main.py` and add new files under `app/` "
-            + "that implement the spec's milestones. Return JSON in the schema described."
+        self.think(
+            f"The plan picked stack={stack}. I'll start from the deterministic scaffold "
+            f"so the project boots no matter what, then layer the spec-specific logic.",
+            scope="strategy",
         )
-        try:
-            text, cost, model = await self.router.chat(
-                "coder",
-                [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.2,
-                max_tokens=4000,
-                json_mode=True,
+        self.decide(
+            f"render baseline template for {stack}",
+            "Templates ship a known-good FastAPI app, requirements.txt, Dockerfile, "
+            "and pytest harness. This guarantees the output runs even if the LLM patch fails.",
+        )
+
+        files = self._render_template(stack, plan)
+        self.metric("baseline_files", len(files), "")
+
+        # Spec-specific code generation (mock mode and a fallback when LLM disabled).
+        spec_files = generate_spec_specific_code(spec, plan)
+        for path, content in spec_files.items():
+            files[path] = content
+
+        # Live LLM patch when available.
+        if self.router.client.configured:
+            self.think(
+                "Grok API is configured — asking the primary model to refine app/main.py "
+                "and tests against the milestones. I'll merge whatever it returns over the "
+                "baseline; on parse error I keep the baseline.",
+                scope="llm",
             )
-            self.cost_usd += cost
-            self.log(f"used model={model} cost=${cost:.4f}")
-            patch = _safe_json(text)
-            for f in patch.get("files", []):
-                if "path" in f and "content" in f:
-                    files[f["path"]] = f["content"]
-        except Exception as e:  # noqa: BLE001
-            self.log(f"LLM patch failed, using baseline scaffold: {e}")
+            try:
+                self.tool_call("grok.chat", {"stage": "coder", "json_mode": True})
+                text, cost, model = await self.router.chat(
+                    "coder",
+                    [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content":
+                            "PLAN:\n" + json.dumps(plan, indent=2)[:6000]
+                            + "\n\nReturn JSON with `files` replacing or adding to `app/`."},
+                    ],
+                    temperature=0.2,
+                    max_tokens=4000,
+                    json_mode=True,
+                )
+                self.cost_usd += cost
+                self.metric("tokens_cost_usd", round(cost, 4), "$")
+                self.tool_call("grok.chat.return", {"model": model, "cost_usd": cost})
+                patch = _safe_json(text)
+                for f in patch.get("files", []):
+                    if "path" in f and "content" in f:
+                        files[f["path"]] = f["content"]
+            except Exception as e:
+                self.think(f"LLM patch failed ({e}); keeping deterministic scaffold + spec-tailored code.",
+                           scope="fallback")
+        else:
+            self.think(
+                "No GROK_API_KEY configured — running in deterministic mock mode. "
+                "The code below is generated by spec-keyword templates, not an LLM.",
+                scope="mock",
+            )
+
+        # Emit one file_written event per file so the UI can build a live tree.
+        for path, content in sorted(files.items()):
+            self.file_written(path, content, language=_lang_for(path))
+
+        self.metric("total_files", len(files), "")
+        self.metric("total_lines", sum(c.count("\n") + 1 for c in files.values()), "")
 
         return {
             "files": [{"path": p, "content": c} for p, c in sorted(files.items())],
@@ -96,10 +136,9 @@ class CoderAgent(Agent):
         return 0.4 + 0.2 * has_main + 0.2 * has_req + 0.2 * has_test
 
     def _render_template(self, stack: str, plan: dict[str, Any]) -> dict[str, str]:
-        # Map stack id to template directory; we ship python+fastapi as the only one.
         stack_dir = {
             "python+fastapi": "python_fastapi",
-            "rust+axum": "python_fastapi",  # fallback until rust+axum template ships
+            "rust+axum": "python_fastapi",
             "typescript+next": "python_fastapi",
         }.get(stack, "python_fastapi")
 
@@ -114,7 +153,6 @@ class CoderAgent(Agent):
         for path in root.rglob("*"):
             if not path.is_file():
                 continue
-            # Skip Python build/cache artifacts that may sit beside template files.
             if any(part in {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
                    for part in path.parts):
                 continue
@@ -128,6 +166,30 @@ class CoderAgent(Agent):
             else:
                 out[rel] = path.read_text()
         return out
+
+
+def _lang_for(path: str) -> str:
+    if path.endswith(".py"):
+        return "python"
+    if path.endswith(".rs"):
+        return "rust"
+    if path.endswith(".ts") or path.endswith(".tsx"):
+        return "typescript"
+    if path.endswith(".js") or path.endswith(".jsx"):
+        return "javascript"
+    if path.endswith(".yaml") or path.endswith(".yml"):
+        return "yaml"
+    if path.endswith(".json"):
+        return "json"
+    if path.endswith(".md"):
+        return "markdown"
+    if path.endswith(".toml"):
+        return "toml"
+    if path.endswith("Dockerfile") or path.endswith(".dockerfile"):
+        return "dockerfile"
+    if path.endswith(".txt"):
+        return "text"
+    return "text"
 
 
 def _safe_json(text: str) -> dict[str, Any]:
