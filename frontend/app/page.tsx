@@ -7,14 +7,21 @@ import { motion } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
 import SpecForm from "@/components/dashboard/SpecForm";
 import Dashboard from "@/components/dashboard/Dashboard";
+import CoreStatusBanner from "@/components/dashboard/CoreStatusBanner";
+import { useCoreHealth } from "@/lib/useCoreHealth";
 
 const CORE_URL = process.env.NEXT_PUBLIC_CORE_URL || "http://localhost:8080";
 
 export default function Home() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const health = useCoreHealth(CORE_URL);
 
   const submit = async (spec: string) => {
+    if (health.status !== "online") {
+      toast.error("core is offline — fix the banner above first");
+      return;
+    }
     setBusy(true);
     try {
       const r = await fetch(`${CORE_URL}/jobs`, {
@@ -31,15 +38,13 @@ export default function Home() {
       setJobId(id);
       toast.success("forge started — watching the swarm");
     } catch (e: any) {
-      toast.error(`network error: ${e.message ?? e}`);
+      toast.error(`network error: ${e?.message ?? e}`);
     } finally {
       setBusy(false);
     }
   };
 
-  const reset = () => {
-    setJobId(null);
-  };
+  const reset = () => setJobId(null);
 
   return (
     <main className="min-h-screen container py-8 max-w-[1400px]">
@@ -48,7 +53,7 @@ export default function Home() {
       <motion.header
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between mb-8"
+        className="flex items-center justify-between mb-6"
       >
         <div className="flex items-center gap-3">
           <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-primary to-emerald-300 grid place-items-center shadow-lg shadow-primary/30">
@@ -63,7 +68,8 @@ export default function Home() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <CoreStatusBanner health={health} coreUrl={CORE_URL} />
           <Badge variant="outline" className="gap-1">
             <Sparkles className="h-3 w-3 text-primary" /> v0.1
           </Badge>
@@ -86,6 +92,9 @@ export default function Home() {
         </div>
       </motion.header>
 
+      {/* Full banner only when offline; the header pill covers the healthy case. */}
+      {health.status === "offline" && <CoreStatusBanner health={health} coreUrl={CORE_URL} />}
+
       {!jobId ? (
         <div className="max-w-3xl mx-auto mt-12">
           <motion.div
@@ -103,7 +112,7 @@ export default function Home() {
               debate round live.
             </p>
           </motion.div>
-          <SpecForm onSubmit={submit} busy={busy} />
+          <SpecForm onSubmit={submit} busy={busy || health.status !== "online"} />
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
