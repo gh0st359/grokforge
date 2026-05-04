@@ -101,6 +101,8 @@ To shut down: `docker compose down` (add `-v` to also drop the state volume).
 
 | Symptom | Fix |
 |---|---|
+| Browser console: `POST http://localhost:8080/jobs net::ERR_CONNECTION_REFUSED` | Core service isn't responding. The UI now shows a banner with copy-paste commands; under the hood run `make diagnose` for a detailed report (`docker compose ps`, port checks, last 30 lines of core logs). Most often the core build failed — `docker compose build --no-cache core` and watch the output. |
+| Core container builds but immediately exits | `docker compose logs core` will show the panic. If it's a missing dep, ensure no local `Cargo.lock` is stale; we don't ship a lockfile, so the resolver picks fresh versions. |
 | `Cannot connect to the Docker daemon` | Docker isn't running. Start Docker Desktop, or `sudo systemctl start docker` on Linux. |
 | `permission denied while trying to connect ... docker.sock` | Add yourself to the `docker` group: `sudo usermod -aG docker $USER` then re-login. |
 | Compose build hangs on "Compiling grokforge-core" | First-time Rust build from source — expect 3–6 min. Subsequent builds are cached. |
@@ -108,6 +110,8 @@ To shut down: `docker compose down` (add `-v` to also drop the state volume).
 | Port already in use | Another service is on 3000/8080/9091/3001. Stop it or change the host-side port in `docker-compose.yml`. |
 | `agents` returns 500 on every request | If `GROK_API_KEY` is set but invalid, calls fail. Either fix the key or unset it to use mock mode. |
 | Logs show `agent planner returned non-2xx` | Almost always a malformed `GROK_API_KEY`. Re-check `.env` and `docker compose up -d --force-recreate agents`. |
+
+**Recommended boot sequence:** `make up-wait` — it builds the stack, then polls `:8080/health` for up to 2 minutes and prints either the URL to open or `make diagnose` instructions if core never came up.
 
 ### Sanity check (no Docker)
 
